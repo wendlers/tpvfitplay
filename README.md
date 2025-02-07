@@ -1,4 +1,4 @@
-# TVPFITPLAY
+# TPVFITPLAY
 
 This is a simple commandline tool which take one or more FIT files as input and outputs the ride data from the FIT file into a TrainingPeaksVirtual (TPV) compatible broadcast format (`focus.json`). Each time new ride data is read from the FIT file, the `focus.json`is updated. 
 
