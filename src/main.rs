@@ -1,4 +1,4 @@
-//! Read one or more FIT files and dump their contents as JSON
+//! Read one or more FIT files and dump their contents as JSON TPV 'focus.json'
 use fitparser::de::{from_reader_with_options, DecodeOption};
 use fitparser::profile::MesgNum;
 use serde::{Deserialize, Serialize};
@@ -85,32 +85,34 @@ impl Focus {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[allow(dead_code)]
 struct ValueU32 {
     value: u32,
     units: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[allow(dead_code)]
 struct ValueF32 {
     value: f32,
     units: String,
 }
 
-/// Parse FIT formatted files and output their data in the JSON format
+/// Read FIT formatted files and output each waypoint as TPV 'focus.json' file
 #[derive(Debug, StructOpt)]
-#[structopt(name = "fit_to_json")]
+#[structopt(name = "tpvfitplay")]
 struct Cli {
-    /// FIT files to convert to JSON
+    /// FIT files to read and play back as TPV 'focus.json'
     #[structopt(name = "FILE", parse(from_os_str))]
     files: Vec<PathBuf>,
 
-    /// Output location, if not provided the JSON file will be output alongside the input file. If a
-    /// directory is provided all FIT files will be written there using the same filename but with
-    /// a '.json' extension. If multiple FIT files are provided and the output path isn't a
-    /// directory the JSON array will store all records present in the order they were read. Using
-    /// a "-" as the output file name will result in all content being printed to STDOUT.
-    #[structopt(short, long, parse(from_os_str))]
-    output: Option<PathBuf>,
+    /// Output file location, if not provided the JSON file will be named 'focus.json'
+    #[structopt(short, long, parse(from_os_str), default_value = "focus.json")]
+    output: PathBuf,
+
+    /// Delay between updates of 'focus.json' in msec.
+    #[structopt(short, long, default_value = "250")]
+    delay: u64,
 
     /// Drop fields and messages that aren't defined in the profile
     #[structopt(long)]
@@ -153,110 +155,63 @@ impl FitDataMap {
     }
 }
 
-#[derive(Clone, Debug)]
-enum OutputLocation {
-    Inplace,
-    LocalDirectory(PathBuf),
-    LocalFile(PathBuf),
-    Stdout,
-}
+fn write_json_file_focus(
+    filename: &Path,
+    data: Vec<fitparser::FitDataRecord>, delay: u64) -> Result<(), Box<dyn Error>> {
+    let data: Vec<FitDataMap> = data.into_iter().map(FitDataMap::new).collect();
 
-impl OutputLocation {
-    fn new(location: PathBuf) -> Self {
-        if location.is_dir() {
-            OutputLocation::LocalDirectory(location)
-        } else if location.as_os_str() == "-" {
-            OutputLocation::Stdout
-        } else {
-            OutputLocation::LocalFile(location)
-        }
-    }
+    let mut ts: u32 = 0;
 
-    fn write_json_file_focus(
-        &self,
-        filename: &Path,
-        data: Vec<fitparser::FitDataRecord>,
-    ) -> Result<(), Box<dyn Error>> {
-        let data: Vec<FitDataMap> = data.into_iter().map(FitDataMap::new).collect();
+    for fdm in data {
+        if fdm.kind == MesgNum::Record {
+            let mut focus = Focus::new();
 
-        let mut ts: u32 = 0;
+            focus.time = ts;
+            ts += 1;
 
-        for fdm in data {
-            if fdm.kind == MesgNum::Record {
-                let mut focus = Focus::new();
-
-                focus.time = ts;
-                ts += 1;
-
-                for field in fdm.fields {
-                    // println!("{} = {}", field.0, field.1);
-                    let tmp = serde_json::to_string(&field.1)?;
-                    if field.0 == "power" {
-                        let value_u32: ValueU32 = serde_json::from_str(&tmp)?;
-                        focus.power = value_u32.value;
-                    } else if field.0 == "heart_rate" {
-                        let value_u32: ValueU32 = serde_json::from_str(&tmp)?;
-                        focus.heartrate = value_u32.value;
-                    } else if field.0 == "cadence" {
-                        let value_u32: ValueU32 = serde_json::from_str(&tmp)?;
-                        focus.cadence = value_u32.value;
-                    } else if field.0 == "distance" {
-                        let value_f32: ValueF32 = serde_json::from_str(&tmp)?;
-                        focus.distance = value_f32.value as u32;
-                    } else if field.0 == "enhanced_speed" {
-                        let value_f32: ValueF32 = serde_json::from_str(&tmp)?;
-                        focus.speed = (value_f32.value * 3.6 * 275.0) as u32;
-                    } else if field.0 == "grade" {
-                        let value_f32: ValueF32 = serde_json::from_str(&tmp)?;
-                        focus.slope = value_f32.value as i32;
-                    } else if field.0 == "enhanced_altitude" {
-                        let value_f32: ValueF32 = serde_json::from_str(&tmp)?;
-                        focus.height = 450 + value_f32.value as u32;
-                    }
+            for field in fdm.fields {
+                // println!("{} = {}", field.0, field.1);
+                let tmp = serde_json::to_string(&field.1)?;
+                if field.0 == "power" {
+                    let value_u32: ValueU32 = serde_json::from_str(&tmp)?;
+                    focus.power = value_u32.value;
+                } else if field.0 == "heart_rate" {
+                    let value_u32: ValueU32 = serde_json::from_str(&tmp)?;
+                    focus.heartrate = value_u32.value;
+                } else if field.0 == "cadence" {
+                    let value_u32: ValueU32 = serde_json::from_str(&tmp)?;
+                    focus.cadence = value_u32.value;
+                } else if field.0 == "distance" {
+                    let value_f32: ValueF32 = serde_json::from_str(&tmp)?;
+                    focus.distance = value_f32.value as u32;
+                } else if field.0 == "enhanced_speed" {
+                    let value_f32: ValueF32 = serde_json::from_str(&tmp)?;
+                    focus.speed = (value_f32.value * 3.6 * 275.0) as u32;
+                } else if field.0 == "grade" {
+                    let value_f32: ValueF32 = serde_json::from_str(&tmp)?;
+                    focus.slope = value_f32.value as i32;
+                } else if field.0 == "enhanced_altitude" {
+                    let value_f32: ValueF32 = serde_json::from_str(&tmp)?;
+                    focus.height = 450 + value_f32.value as u32;
                 }
-                
-                let focus_list = vec![focus];
-                let json = serde_json::to_string(&focus_list)?;
-                let bom: String = String::from("123");
-                print!("{focus_list:#?}");
-
-                let mut fp = File::create("/home/stefan/devel/tpvbc2http/http/testing/focus.json")?;
-                fp.write_all(bom.as_bytes())?;
-                fp.write_all(json.as_bytes())?;
-
-                thread::sleep(time::Duration::from_millis(250));
             }
-        }
-        Ok(())
-    }
+            
+            let focus_list = vec![focus];
+            let json = serde_json::to_string(&focus_list)?;
+            let bom: String = String::from("   ");
+            // print!("{focus_list:#?}");
+            print!("- processing time-stamp: {:5}", ts);
 
-    fn write_json_file(
-        &self,
-        filename: &Path,
-        data: Vec<fitparser::FitDataRecord>,
-    ) -> Result<(), Box<dyn Error>> {
-        // convert data to a name: {value, units} map before serializing
-        let data: Vec<FitDataMap> = data.into_iter().map(FitDataMap::new).collect();
-        let json = serde_json::to_string(&data)?;
+            // let mut fp = File::create("/home/stefan/devel/tpvbc2http/http/testing/focus.json")?;
+            let mut fp = File::create(filename)?;
+            fp.write_all(bom.as_bytes())?;
+            fp.write_all(json.as_bytes())?;
 
-        let outname = match self {
-            Self::Inplace => filename.with_extension("json"),
-            Self::LocalDirectory(dest) => dest
-                .clone()
-                .join(filename.file_name().unwrap())
-                .with_extension("json"),
-            Self::LocalFile(dest) => dest.clone(),
-            Self::Stdout => {
-                println!("{}", json);
-                return Ok(());
-            }
-        };
-        let mut fp = File::create(outname)?;
-        match fp.write_all(json.as_bytes()) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(Box::new(e)),
+            thread::sleep(time::Duration::from_millis(delay));
+            println!("\x1b[5D\x1b[1A");
         }
     }
+    Ok(())
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
@@ -283,37 +238,29 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
 
     // define parsed and serialized data output location
-    let output_loc = opt
-        .output
-        .map_or(OutputLocation::Inplace, OutputLocation::new);
-    let collect_all = matches!(output_loc, OutputLocation::LocalFile(_));
+    let output_loc = opt.output.as_path();
 
     // read from STDIN if no files were given
     if opt.files.is_empty() {
+        println!("Reading from: stdin");
+        println!("Writing   to: {:?}", output_loc);
+
         let mut stdin = io::stdin();
         let data = from_reader_with_options(&mut stdin, &decode_opts)?;
-        output_loc.write_json_file(&PathBuf::from("<stdin>"), data)?;
+        write_json_file_focus(output_loc, data, opt.delay)?;
         return Ok(());
     }
 
     // Read each FIT file and output it
-    let mut all_fit_data: Vec<fitparser::FitDataRecord> = Vec::new();
     for file in opt.files {
         // open file and parse data
-        let mut fp = File::open(&file)?;
-        let mut data = from_reader_with_options(&mut fp, &decode_opts)?;
+        println!("Reading from: {:?}", file);
+        println!("Writing   to: {:?}", output_loc);
 
-        // output a single fit file's data into a single output file
-        if collect_all {
-            all_fit_data.append(&mut data);
-        } else {
-            //output_loc.write_json_file(&file, data)?;
-            output_loc.write_json_file_focus(&file, data)?;
-        }
-    }
-    // output fit data from all files into a single file
-    if collect_all {
-        output_loc.write_json_file(&PathBuf::new(), all_fit_data)?;
+        let mut fp = File::open(&file)?;
+        let data = from_reader_with_options(&mut fp, &decode_opts)?;
+        write_json_file_focus(output_loc, data, opt.delay)?;
+        println!("");
     }
 
     Ok(())
