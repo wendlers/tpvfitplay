@@ -198,13 +198,11 @@ fn write_json_file_focus(
             
             let focus_list = vec![focus];
             let json = serde_json::to_string(&focus_list)?;
-            let bom: String = String::from("   ");
             // print!("{focus_list:#?}");
             print!("- processing time-stamp: {:5}", ts);
 
             // let mut fp = File::create("/home/stefan/devel/tpvbc2http/http/testing/focus.json")?;
             let mut fp = File::create(filename)?;
-            fp.write_all(bom.as_bytes())?;
             fp.write_all(json.as_bytes())?;
 
             thread::sleep(time::Duration::from_millis(delay));
